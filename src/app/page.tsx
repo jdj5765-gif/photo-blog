@@ -8,37 +8,99 @@ import type { PlaceInfo } from "@/lib/naver-place";
 const MAX_IMAGES = 30;
 const MAX_EDGE = 1568; // Claude 비전 권장 최대 변 길이
 
+/**
+ * 배포 환경(Vercel)은 요청 하나를 4.5MB까지만 받습니다.
+ * 다른 입력값과 통신 여유분을 빼고 사진에 3.4MB만 씁니다.
+ */
+const UPLOAD_BUDGET = 3_400_000;
+/** 화질을 낮춰가며 시도할 순서. 위에서부터 쓰고, 안 맞으면 아래로 내려갑니다. */
+const STEPS: { edge: number; quality: number }[] = [
+  { edge: 1568, quality: 0.85 },
+  { edge: 1568, quality: 0.7 },
+  { edge: 1280, quality: 0.7 },
+  { edge: 1120, quality: 0.6 },
+  { edge: 896, quality: 0.55 },
+  { edge: 768, quality: 0.5 },
+];
+
 interface Photo {
   id: string;
   name: string;
+  /** 목록에 보여줄 작은 미리보기 */
   preview: string;
-  media_type: string;
-  data: string;
+  /** 보낼 때 다시 압축하려고 원본을 들고 있습니다. */
+  file: File;
 }
 
-/** 캔버스로 리사이즈해서 업로드 용량과 토큰 비용을 줄입니다. */
-async function fileToPhoto(file: File): Promise<Photo> {
+/** 캔버스로 리사이즈해서 base64로 만듭니다. */
+async function encode(
+  file: File,
+  edge: number,
+  quality: number,
+): Promise<string> {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
-  const w = Math.round(bitmap.width * scale);
-  const h = Math.round(bitmap.height * scale);
-
+  const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("캔버스를 사용할 수 없습니다.");
-  ctx.drawImage(bitmap, 0, 0, w, h);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
 
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+  return canvas.toDataURL("image/jpeg", quality).split(",")[1];
+}
+
+async function fileToPhoto(file: File): Promise<Photo> {
   return {
     id: crypto.randomUUID(),
     name: file.name,
-    preview: dataUrl,
-    media_type: "image/jpeg",
-    data: dataUrl.split(",")[1],
+    // 미리보기는 작게 만들어 화면을 가볍게 유지합니다.
+    preview: `data:image/jpeg;base64,${await encode(file, 320, 0.7)}`,
+    file,
   };
+}
+
+/**
+ * 장수에 맞춰 사진 한 장당 쓸 수 있는 용량을 나누고,
+ * 그 안에 들어올 때까지 화질을 단계적으로 낮춥니다.
+ */
+async function buildImages(
+  photos: Photo[],
+  onProgress?: (done: number) => void,
+): Promise<{ media_type: string; data: string }[]> {
+  const perPhoto = UPLOAD_BUDGET / Math.max(photos.length, 1);
+  const out: { media_type: string; data: string }[] = [];
+
+  for (const [i, photo] of photos.entries()) {
+    let data = "";
+    let fits = false;
+    for (const step of STEPS) {
+      data = await encode(photo.file, step.edge, step.quality);
+      if (data.length <= perPhoto) {
+        fits = true;
+        break;
+      }
+    }
+    // 표의 최저 단계로도 안 맞으면 640px 밑으로는 안 내려가되 계속 줄여봅니다.
+    let edge = 768;
+    while (!fits && edge > 512) {
+      edge = Math.round(edge * 0.8);
+      data = await encode(photo.file, edge, 0.45);
+      fits = data.length <= perPhoto;
+    }
+    out.push({ media_type: "image/jpeg", data });
+    onProgress?.(i + 1);
+  }
+
+  const total = out.reduce((sum, img) => sum + img.data.length, 0);
+  if (total > UPLOAD_BUDGET) {
+    throw new Error(
+      `사진 용량이 커서 다 보낼 수 없습니다. 지금 ${photos.length}장인데 몇 장 줄여주세요.`,
+    );
+  }
+  return out;
 }
 
 /** 스트리밍 중인 결과에서 "## 제목 후보" 항목만 뽑아냅니다. */
@@ -430,6 +492,12 @@ export default function Home() {
     abortRef.current = controller;
 
     try {
+      setNotice(`사진 준비 중… (0/${photos.length})`);
+      const images = await buildImages(photos, (done) =>
+        setNotice(`사진 준비 중… (${done}/${photos.length})`),
+      );
+      setNotice("");
+
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -443,13 +511,22 @@ export default function Home() {
           keywordVotes,
           facts,
           extra,
-          images: photos.map((p) => ({ media_type: p.media_type, data: p.data })),
+          images,
         }),
       });
 
       if (!res.ok) {
-        const { error: msg } = await res.json().catch(() => ({ error: "요청 실패" }));
-        setError(msg ?? "요청 실패");
+        // 413은 서버가 JSON이 아니라 안내 문구를 돌려줍니다.
+        if (res.status === 413) {
+          setError(
+            "사진 용량이 한도를 넘었습니다. 장수를 줄이고 다시 시도해주세요.",
+          );
+          return;
+        }
+        const { error: msg } = await res
+          .json()
+          .catch(() => ({ error: `요청 실패 (${res.status})` }));
+        setError(msg ?? `요청 실패 (${res.status})`);
         return;
       }
       if (!res.body) {
@@ -470,6 +547,7 @@ export default function Home() {
       }
     } finally {
       setLoading(false);
+      setNotice("");
       abortRef.current = null;
     }
   };
@@ -573,7 +651,8 @@ export default function Home() {
             <p className="mt-3 text-xs text-neutral-500">
               {photos.length}장 사용 · 예상 비용 약 $
               {(0.05 + photos.length * 0.008 + 0.1).toFixed(2)}
-              {photos.length > 20 && " · 사진이 많으면 생성이 오래 걸립니다"}
+              {photos.length > 15 &&
+                " · 장수가 많으면 화질을 낮춰 보냅니다. 8~15장이 가장 좋습니다"}
             </p>
             <ul className="mt-3 grid grid-cols-3 gap-3 sm:grid-cols-6">
               {photos.map((p, i) => (
