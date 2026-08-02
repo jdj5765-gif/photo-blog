@@ -30,6 +30,8 @@ export interface PlaceInfo {
   conveniences: string[];
   businessHours: string | null;
   menus: PlaceMenu[];
+  /** 사장님이 실제로 쓰고 있는 네이버 도구 (네이버예약 등). 원격 예약 가능 여부 판단용 */
+  activeTools: string[];
   /** 방문자가 실제로 고른 키워드 리뷰, 많이 고른 순 */
   keywordVotes: KeywordVote[];
   visitorReviewCount: number | null;
@@ -185,6 +187,34 @@ function findBusinessHours(state: unknown): unknown {
   return walk(state);
 }
 
+interface BusinessTool {
+  title?: string | null;
+  using?: boolean | null;
+}
+
+/** 사장님이 쓰는 네이버 도구 목록. businessHours처럼 위치가 일정하지 않습니다. */
+function findBusinessTools(state: unknown): BusinessTool[] {
+  const seen = new Set<object>();
+
+  function walk(node: unknown): BusinessTool[] | null {
+    if (!node || typeof node !== "object") return null;
+    if (seen.has(node)) return null;
+    seen.add(node);
+
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (key === "businessTools" && value && typeof value === "object") {
+        const tools = (value as Record<string, unknown>).tools;
+        if (Array.isArray(tools)) return tools as BusinessTool[];
+      }
+      const nested = walk(value);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  return walk(state) ?? [];
+}
+
 /**
  * 방문자가 고른 키워드 리뷰와 득표수를 찾습니다.
  * 영업시간과 마찬가지로 위치가 일정하지 않아 상태 전체를 훑습니다.
@@ -279,6 +309,14 @@ export async function fetchPlaceInfo(input: string): Promise<PlaceInfo> {
     ? (base.conveniences as unknown[]).filter((c): c is string => typeof c === "string")
     : [];
 
+  // businessTools 중 using=true 인 것만 실제로 쓰고 있는 도구입니다.
+  // 영업시간과 마찬가지로 base가 아닌 다른 자리에 있어서 전체를 훑어 찾습니다.
+  const tools = findBusinessTools(state);
+  const activeTools = tools
+    .filter((t) => t?.using === true)
+    .map((t) => str(t.title))
+    .filter((t): t is string => Boolean(t));
+
   const reviews = base.visitorReviewsTotal;
 
   return {
@@ -290,6 +328,7 @@ export async function fetchPlaceInfo(input: string): Promise<PlaceInfo> {
     phone: str(base.virtualPhone) ?? str(base.phone),
     conveniences,
     businessHours: formatBusinessHours(findBusinessHours(state)),
+    activeTools,
     keywordVotes: findKeywordVotes(state),
     menus,
     visitorReviewCount: typeof reviews === "number" ? reviews : null,

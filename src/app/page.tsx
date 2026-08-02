@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { NAVER_KEYWORD_GROUPS, HIGHLIGHT_PRESETS } from "@/lib/naver-keywords";
 import type { PostType } from "@/lib/prompt";
+import type { PlaceInfo } from "@/lib/naver-place";
 
 const MAX_IMAGES = 30;
 const MAX_EDGE = 1568; // Claude 비전 권장 최대 변 길이
@@ -98,6 +99,180 @@ function Chip({
   );
 }
 
+/** 편의시설 목록에서 특정 항목이 있는지 봅니다. (예: "주차" → "주차하기 편해요"가 아니라 편의시설 쪽) */
+function has(list: string[], keyword: string): boolean {
+  return list.some((c) => c.includes(keyword));
+}
+
+/** 네이버가 안 갖고 있어서 직접 눌러야 하는 항목 */
+export interface ManualInfo {
+  restroom: "실내" | "실외" | null;
+  remoteWaiting: "가능" | "불가" | null;
+}
+
+function Toggle({
+  options,
+  value,
+  onChange,
+}: {
+  options: string[];
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  return (
+    <span className="flex gap-1">
+      {options.map((o) => (
+        <button
+          key={o}
+          type="button"
+          // 같은 걸 다시 누르면 선택 해제됩니다.
+          onClick={() => onChange(value === o ? null : o)}
+          className={`rounded border px-2 py-0.5 text-xs transition ${
+            value === o
+              ? "border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900"
+              : "border-neutral-300 text-neutral-500 hover:border-neutral-500 dark:border-neutral-700"
+          }`}
+        >
+          {o}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+/** 플레이스에서 가져온 값만 보여줍니다. 없는 항목은 '미등록'으로 두고 지어내지 않습니다. */
+function PlaceInfoCard({
+  info,
+  manual,
+  onManualChange,
+}: {
+  info: PlaceInfo;
+  manual: ManualInfo;
+  onManualChange: (next: ManualInfo) => void;
+}) {
+  const priced = info.menus.filter((m) => m.price);
+  const rows: { icon: string; label: string; value: string | null }[] = [
+    { icon: "📍", label: "주소", value: info.roadAddress ?? info.address },
+    { icon: "🕒", label: "영업", value: info.businessHours },
+    {
+      icon: "🅿️",
+      label: "주차",
+      value: has(info.conveniences, "주차") ? "가능" : null,
+    },
+    { icon: "☎️", label: "전화", value: info.phone },
+    {
+      icon: "🥡",
+      label: "포장·배달",
+      value:
+        [
+          has(info.conveniences, "포장") ? "포장" : null,
+          has(info.conveniences, "배달") ? "배달" : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || null,
+    },
+    {
+      icon: "👥",
+      label: "단체",
+      value: has(info.conveniences, "단체") ? "가능" : null,
+    },
+    {
+      icon: "🚻",
+      label: "화장실",
+      value: info.conveniences.filter((c) => c.includes("화장실")).join(" · ") || null,
+    },
+    {
+      icon: "⏳",
+      label: "웨이팅·예약",
+      value:
+        [
+          has(info.conveniences, "대기공간") ? "대기공간 있음" : null,
+          has(info.conveniences, "예약") ? "예약 가능" : null,
+          info.activeTools.find((t) => t.includes("예약")) ?? null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || null,
+    },
+    {
+      icon: "💰",
+      label: "대표 가격",
+      value:
+        priced.length > 0
+          ? priced
+              .slice(0, 3)
+              .map(
+                (m) => `${m.name} ${Number(m.price).toLocaleString("ko-KR")}원`,
+              )
+              .join(" · ")
+          : null,
+    },
+  ];
+
+  return (
+    <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 p-4 text-sm dark:border-neutral-800 dark:bg-neutral-900/50">
+      <p className="mb-3 font-medium">
+        {info.name ?? "가게 정보"}
+        {info.category && (
+          <span className="ml-2 text-xs font-normal text-neutral-500">
+            {info.category}
+          </span>
+        )}
+        {info.visitorReviewCount !== null && (
+          <span className="ml-2 text-xs font-normal text-neutral-500">
+            리뷰 {info.visitorReviewCount.toLocaleString("ko-KR")}
+          </span>
+        )}
+      </p>
+      <dl className="grid gap-1.5">
+        {rows.map((r) => (
+          <div key={r.label} className="flex gap-2">
+            <dt className="w-24 shrink-0 text-neutral-500">
+              {r.icon} {r.label}
+            </dt>
+            <dd className={r.value ? "" : "text-neutral-400"}>
+              {r.value ?? "미등록"}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <div className="mt-3 grid gap-1.5 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+        <p className="text-xs text-neutral-500">
+          아래 둘은 네이버가 갖고 있지 않아 직접 눌러주셔야 합니다. 누른 값만 글에 반영됩니다.
+        </p>
+        <div className="flex items-center gap-2">
+          <span className="w-24 shrink-0 text-neutral-500">🚻 화장실 위치</span>
+          <Toggle
+            options={["실내", "실외"]}
+            value={manual.restroom}
+            onChange={(v) =>
+              onManualChange({ ...manual, restroom: v as ManualInfo["restroom"] })
+            }
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-24 shrink-0 text-neutral-500">📱 원격 웨이팅</span>
+          <Toggle
+            options={["가능", "불가"]}
+            value={manual.remoteWaiting}
+            onChange={(v) =>
+              onManualChange({
+                ...manual,
+                remoteWaiting: v as ManualInfo["remoteWaiting"],
+              })
+            }
+          />
+        </div>
+      </div>
+
+      {info.conveniences.length > 0 && (
+        <p className="mt-3 border-t border-neutral-200 pt-3 text-xs text-neutral-500 dark:border-neutral-800">
+          {info.conveniences.join(" · ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [postType, setPostType] = useState<PostType>("restaurant");
@@ -112,6 +287,13 @@ export default function Home() {
   const [keywordVotes, setKeywordVotes] = useState<
     { name: string; count: number }[]
   >([]);
+  const [placeInfo, setPlaceInfo] = useState<PlaceInfo | null>(null);
+  const [manual, setManual] = useState<ManualInfo>({
+    restroom: null,
+    remoteWaiting: null,
+  });
+  // 서버에서 받은 원본 정보. 토글을 바꿀 때마다 여기에 덧붙여 다시 씁니다.
+  const [baseFacts, setBaseFacts] = useState("");
 
   const [placeUrl, setPlaceUrl] = useState("");
   const [placeLoading, setPlaceLoading] = useState(false);
@@ -150,6 +332,37 @@ export default function Home() {
     }
   }, []);
 
+  /**
+   * 자동으로 채운 부분만 통째로 갈아끼웁니다.
+   * 직접 쓰신 내용은 아래에 그대로 남습니다.
+   */
+  const applyAutoFacts = useCallback((block: string) => {
+    setFacts((prev) => {
+      const kept = autoFactsRef.current
+        ? prev.replace(autoFactsRef.current, "").trim()
+        : prev.trim();
+      autoFactsRef.current = block;
+      return kept ? `${block}\n${kept}` : block;
+    });
+  }, []);
+
+  const buildAutoFacts = (base: string, m: ManualInfo) =>
+    [
+      base,
+      m.restroom ? `화장실: ${m.restroom}` : null,
+      m.remoteWaiting ? `원격 웨이팅: ${m.remoteWaiting}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+  const changeManual = useCallback(
+    (next: ManualInfo) => {
+      setManual(next);
+      applyAutoFacts(buildAutoFacts(baseFacts, next));
+    },
+    [applyAutoFacts, baseFacts],
+  );
+
   const loadPlace = useCallback(async () => {
     const url = placeUrl.trim();
     if (!url) return;
@@ -165,28 +378,18 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "정보를 가져오지 못했습니다.");
 
-      const info = data.info as {
-        name: string | null;
-        roadAddress: string | null;
-        businessHours: string | null;
-        menus: { name: string }[];
-        keywordVotes: { name: string; count: number }[];
-      };
+      const info = data.info as PlaceInfo;
       const nextFacts: string = data.facts ?? "";
 
       if (info.name) setSubject(info.name);
       if (info.roadAddress) {
         setLocation(info.roadAddress.split(/\s+/).slice(0, 2).join(" "));
       }
-      setFacts((prev) => {
-        const kept = autoFactsRef.current
-          ? prev.replace(autoFactsRef.current, "").trim()
-          : prev.trim();
-        autoFactsRef.current = nextFacts;
-        return kept ? `${nextFacts}\n${kept}` : nextFacts;
-      });
+      setBaseFacts(nextFacts);
+      applyAutoFacts(buildAutoFacts(nextFacts, manual));
 
       setKeywordVotes(info.keywordVotes ?? []);
+      setPlaceInfo(info);
 
       const missing: string[] = [];
       if (!info.businessHours) missing.push("영업시간");
@@ -203,7 +406,7 @@ export default function Home() {
     } finally {
       setPlaceLoading(false);
     }
-  }, [placeUrl]);
+  }, [placeUrl, applyAutoFacts, manual]);
 
   const toggle = (arr: string[], set: (v: string[]) => void, v: string) =>
     set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
@@ -461,6 +664,13 @@ export default function Home() {
             <p className="mt-1.5 text-xs text-red-600">
               {placeError} 직접 입력해도 됩니다.
             </p>
+          )}
+          {placeInfo && (
+            <PlaceInfoCard
+              info={placeInfo}
+              manual={manual}
+              onManualChange={changeManual}
+            />
           )}
         </div>
         <div>
