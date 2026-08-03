@@ -59,7 +59,10 @@ export function buildSystemPrompt(opts: GenerateOptions): string {
 
   if (REFERENCE_EXAMPLES.length > 0) {
     blocks.push(
-      `[참고 글 예시] — 아래 글의 톤과 구조를 참고하되 문장을 그대로 베끼지 마십시오.\n\n${REFERENCE_EXAMPLES.join(
+      `[말투 예시] — 아래는 목소리를 잡기 위한 발췌입니다.
+글의 구성과 순서는 참고하지 마십시오. 뼈대는 위 스타일 가이드를 따릅니다.
+어미, 문장 길이, 감정 표현, 웃음 표기(ㅎㅎ/ㅋㅋㅋ)의 밀도만 이만큼 맞추십시오.
+문장을 그대로 베끼지 말고, 소재가 달라도 같은 사람이 쓴 것처럼 들리게 씁니다.\n\n${REFERENCE_EXAMPLES.join(
         "\n\n---\n\n",
       )}`,
     );
