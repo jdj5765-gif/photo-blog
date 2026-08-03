@@ -6,7 +6,6 @@ import type { PostType } from "@/lib/prompt";
 import type { PlaceInfo } from "@/lib/naver-place";
 
 const MAX_IMAGES = 30;
-const MAX_EDGE = 1568; // Claude 비전 권장 최대 변 길이
 
 /**
  * 배포 환경(Vercel)은 요청 하나를 4.5MB까지만 받습니다.
@@ -101,6 +100,68 @@ async function buildImages(
     );
   }
   return out;
+}
+
+/** **굵게** 표기를 실제 굵은 글씨로 바꿔 보여줍니다. */
+function renderInline(text: string, keyPrefix: string) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      return <strong key={`${keyPrefix}-${i}`}>{part.slice(2, -2)}</strong>;
+    }
+    return <span key={`${keyPrefix}-${i}`}>{part}</span>;
+  });
+}
+
+/** 결과를 소제목·문단으로 나눠 보여줍니다. 전체 마크다운을 다루지는 않습니다. */
+function ResultView({ md }: { md: string }) {
+  return (
+    <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-relaxed dark:border-neutral-800 dark:bg-neutral-900">
+      {md.split("\n").map((line, i) => {
+        const key = `l${i}`;
+        if (line.startsWith("### ")) {
+          return (
+            <h4 key={key} className="mt-4 mb-1 font-semibold">
+              {renderInline(line.slice(4), key)}
+            </h4>
+          );
+        }
+        if (line.startsWith("## ")) {
+          return (
+            <h3
+              key={key}
+              className="mt-5 mb-2 border-b border-neutral-200 pb-1 font-semibold dark:border-neutral-800"
+            >
+              {line.slice(3)}
+            </h3>
+          );
+        }
+        if (line.trim() === "") return <div key={key} className="h-3" />;
+        return (
+          <p key={key} className="whitespace-pre-wrap">
+            {renderInline(line, key)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 붙여넣을 때 굵은 글씨가 살아있도록 HTML로도 함께 복사합니다. */
+function toHtml(md: string): string {
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  return md
+    .split("\n")
+    .map((line) => {
+      const bold = (s: string) =>
+        escape(s).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      if (line.startsWith("### ")) return `<h4>${bold(line.slice(4))}</h4>`;
+      if (line.startsWith("## ")) return `<h3>${escape(line.slice(3))}</h3>`;
+      if (line.trim() === "") return "<br>";
+      return `<p>${bold(line)}</p>`;
+    })
+    .join("");
 }
 
 /** 스트리밍 중인 결과에서 "## 제목 후보" 항목만 뽑아냅니다. */
@@ -553,7 +614,19 @@ export default function Home() {
   };
 
   const copy = async () => {
-    await navigator.clipboard.writeText(result);
+    try {
+      // 서식이 살아있는 HTML과 원문을 함께 넣습니다.
+      // 네이버 에디터처럼 서식을 받는 곳에서는 굵은 글씨가 그대로 붙습니다.
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([toHtml(result)], { type: "text/html" }),
+          "text/plain": new Blob([result], { type: "text/plain" }),
+        }),
+      ]);
+    } catch {
+      // 오래된 브라우저는 원문만 복사합니다.
+      await navigator.clipboard.writeText(result);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -1007,9 +1080,10 @@ export default function Home() {
               </button>
             </div>
           </div>
-          <pre className="whitespace-pre-wrap rounded-xl border border-neutral-200 bg-neutral-50 p-5 text-sm leading-relaxed dark:border-neutral-800 dark:bg-neutral-900">
-            {result}
-          </pre>
+          <ResultView md={result} />
+          <p className="mt-2 text-xs text-neutral-500">
+            복사하면 굵은 글씨가 유지된 채로 붙습니다. .md 저장은 원문 그대로입니다.
+          </p>
         </section>
       )}
     </main>
