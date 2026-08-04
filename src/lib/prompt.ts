@@ -3,6 +3,39 @@ import { ALL_NAVER_KEYWORDS } from "./naver-keywords";
 
 export type PostType = "restaurant" | "product";
 
+/**
+ * "18:30" 을 "저녁 6시 반"처럼 말로 바꿉니다.
+ * 숫자를 그대로 쓰면 말투가 딱딱해져서 프롬프트에 이 표현을 넘깁니다.
+ */
+export function toKoreanTime(hhmm: string): string | null {
+  const m = hhmm.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour > 23 || minute > 59) return null;
+
+  // 자정대(0시)는 '새벽 12시'보다 '밤 12시'가 자연스럽습니다.
+  const period =
+    hour === 0
+      ? "밤"
+      : hour < 5
+        ? "새벽"
+        : hour < 11
+          ? "아침"
+          : hour < 14
+            ? "점심"
+            : hour < 17
+              ? "오후"
+              : hour < 21
+                ? "저녁"
+                : "밤";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  const minuteText = minute === 0 ? "" : minute === 30 ? " 반" : ` ${minute}분`;
+
+  return `${period} ${hour12}시${minuteText}`;
+}
+
 /** 방문 기록. 사진만으로는 알 수 없어서 사용자가 직접 채워야 하는 값입니다. */
 export interface VisitInfo {
   /** 도착 시각 "18:30" */
@@ -115,17 +148,19 @@ export function buildUserText(opts: GenerateOptions, imageCount: number): string
   ];
   if (opts.visit) {
     const { arrivalTime, waited, waitMinutes } = opts.visit;
+    const spoken = toKoreanTime(arrivalTime) ?? arrivalTime;
     const waitText =
       waited === "있음"
         ? `웨이팅 있었고 ${waitMinutes}분 기다렸습니다`
         : `웨이팅 없이 바로 입장했습니다`;
     lines.push(
       `[방문 기록 — 확인된 사실. 반드시 반영]\n` +
-        `- 도착 시각: ${arrivalTime}\n` +
+        `- 도착 시각: ${spoken} (${arrivalTime})\n` +
         `- 웨이팅: ${waitText}\n` +
         `이 두 가지는 본문 도입부(핵심 포인트 불릿 바로 다음 문단)에 반드시 넣습니다.\n` +
+        `시각은 '${arrivalTime}'처럼 숫자로 적지 말고 반드시 '${spoken}'으로 씁니다.\n` +
         `숫자를 나열하지 말고 문장에 녹여 씁니다.\n` +
-        `예) 저녁 ${arrivalTime}쯤 도착했는데 ` +
+        `예) ${spoken}쯤 도착했는데 ` +
         (waited === "있음"
           ? `이미 줄이 있어서 ${waitMinutes}분 정도 기다렸어요.`
           : `다행히 웨이팅 없이 바로 자리에 앉을 수 있었어요.`) +
