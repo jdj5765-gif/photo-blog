@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { NAVER_KEYWORD_GROUPS, HIGHLIGHT_PRESETS } from "@/lib/naver-keywords";
-import type { PostType } from "@/lib/prompt";
+import type { PostType, VisitInfo } from "@/lib/prompt";
 import type { PlaceInfo } from "@/lib/naver-place";
 
 const MAX_IMAGES = 30;
@@ -407,6 +407,11 @@ export default function Home() {
   const [facts, setFacts] = useState("");
   const [extra, setExtra] = useState("");
 
+  // 방문 기록 — 사진으로는 알 수 없어서 필수로 받습니다.
+  const [arrivalTime, setArrivalTime] = useState("");
+  const [waited, setWaited] = useState<VisitInfo["waited"] | null>(null);
+  const [waitMinutes, setWaitMinutes] = useState("");
+
   const [keywordVotes, setKeywordVotes] = useState<
     { name: string; count: number }[]
   >([]);
@@ -546,6 +551,10 @@ export default function Home() {
       setError("사진을 최소 1장 올려주세요.");
       return;
     }
+    if (visitMissing.length > 0) {
+      setError(`${visitMissing.join(", ")}을(를) 입력해주세요.`);
+      return;
+    }
     setLoading(true);
     setError("");
     setResult("");
@@ -570,6 +579,11 @@ export default function Home() {
           highlights,
           naverKeywords,
           keywordVotes,
+          visit: {
+            arrivalTime,
+            waited,
+            waitMinutes: waited === "있음" ? waitMinutes.trim() : undefined,
+          },
           facts,
           extra,
           images,
@@ -646,6 +660,12 @@ export default function Home() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  // 필수값이 다 찼는지. 안 찼으면 생성 버튼을 막습니다.
+  const visitMissing: string[] = [];
+  if (!arrivalTime) visitMissing.push("도착 시각");
+  if (!waited) visitMissing.push("웨이팅 여부");
+  if (waited === "있음" && !waitMinutes.trim()) visitMissing.push("대기 시간");
 
   const titles = parseTitles(result);
   const usedKeywords = parseUsedKeywords(result);
@@ -845,6 +865,68 @@ export default function Home() {
         </div>
       </section>
 
+      {/* 방문 기록 — 필수 */}
+      <section className="mb-8">
+        <label className={labelCls}>
+          방문 기록 <span className="text-red-600">*</span>{" "}
+          <span className="font-normal text-neutral-500">
+            — 사진으로는 알 수 없는 정보라 직접 넣어주셔야 합니다. 글 도입부에
+            들어갑니다
+          </span>
+        </label>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div>
+            <p className="mb-2 text-sm text-neutral-500">도착 시각</p>
+            <input
+              type="time"
+              className={inputCls}
+              value={arrivalTime}
+              onChange={(e) => setArrivalTime(e.target.value)}
+            />
+          </div>
+          <div>
+            <p className="mb-2 text-sm text-neutral-500">웨이팅</p>
+            <div className="flex gap-2">
+              <Chip
+                label="있었어요"
+                active={waited === "있음"}
+                onClick={() => setWaited(waited === "있음" ? null : "있음")}
+              />
+              <Chip
+                label="없었어요"
+                active={waited === "없음"}
+                onClick={() => {
+                  setWaited(waited === "없음" ? null : "없음");
+                  setWaitMinutes("");
+                }}
+              />
+            </div>
+          </div>
+          {waited === "있음" && (
+            <div>
+              <p className="mb-2 text-sm text-neutral-500">몇 분 기다렸나요</p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  inputMode="numeric"
+                  className={inputCls}
+                  value={waitMinutes}
+                  onChange={(e) => setWaitMinutes(e.target.value)}
+                  placeholder="20"
+                />
+                <span className="shrink-0 text-sm text-neutral-500">분</span>
+              </div>
+            </div>
+          )}
+        </div>
+        {visitMissing.length > 0 && (
+          <p className="mt-2 text-xs text-neutral-500">
+            {visitMissing.join(", ")}을(를) 넣어야 초안을 만들 수 있습니다.
+          </p>
+        )}
+      </section>
+
       {/* 핵심 포인트 */}
       <section className="mb-8">
         <label className={labelCls}>
@@ -990,7 +1072,7 @@ export default function Home() {
         <button
           type="button"
           onClick={generate}
-          disabled={loading}
+          disabled={loading || visitMissing.length > 0}
           className="rounded-lg bg-neutral-900 px-6 py-2.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
         >
           {loading ? "작성 중…" : "초안 생성"}

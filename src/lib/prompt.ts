@@ -3,6 +3,16 @@ import { ALL_NAVER_KEYWORDS } from "./naver-keywords";
 
 export type PostType = "restaurant" | "product";
 
+/** 방문 기록. 사진만으로는 알 수 없어서 사용자가 직접 채워야 하는 값입니다. */
+export interface VisitInfo {
+  /** 도착 시각 "18:30" */
+  arrivalTime: string;
+  /** 웨이팅이 있었는지 */
+  waited: "있음" | "없음";
+  /** 웨이팅이 있었다면 기다린 분 */
+  waitMinutes?: string;
+}
+
 export interface GenerateOptions {
   postType: PostType;
   /** 상호명 / 제품명 */
@@ -15,6 +25,8 @@ export interface GenerateOptions {
   naverKeywords?: string[];
   /** 플레이스에서 가져온, 방문자가 실제로 많이 고른 키워드 (많이 고른 순) */
   keywordVotes?: { name: string; count: number }[];
+  /** 방문 기록 — 필수. 도입부에 반드시 들어갑니다. */
+  visit?: VisitInfo;
   /** 가격, 영업시간, 방문일 등 사용자가 아는 사실 */
   facts?: string;
   /** 추가 요청 사항 */
@@ -101,6 +113,27 @@ export function buildUserText(opts: GenerateOptions, imageCount: number): string
       `${imageCount}장 모두 정확히 한 번씩 등장시키세요.`,
     `리뷰 유형: ${opts.postType === "restaurant" ? "맛집" : "제품"}`,
   ];
+  if (opts.visit) {
+    const { arrivalTime, waited, waitMinutes } = opts.visit;
+    const waitText =
+      waited === "있음"
+        ? `웨이팅 있었고 ${waitMinutes}분 기다렸습니다`
+        : `웨이팅 없이 바로 입장했습니다`;
+    lines.push(
+      `[방문 기록 — 확인된 사실. 반드시 반영]\n` +
+        `- 도착 시각: ${arrivalTime}\n` +
+        `- 웨이팅: ${waitText}\n` +
+        `이 두 가지는 본문 도입부(핵심 포인트 불릿 바로 다음 문단)에 반드시 넣습니다.\n` +
+        `숫자를 나열하지 말고 문장에 녹여 씁니다.\n` +
+        `예) 저녁 ${arrivalTime}쯤 도착했는데 ` +
+        (waited === "있음"
+          ? `이미 줄이 있어서 ${waitMinutes}분 정도 기다렸어요.`
+          : `다행히 웨이팅 없이 바로 자리에 앉을 수 있었어요.`) +
+        `\n뒤쪽 웨이팅 섹션에서 같은 내용을 또 반복하지 말고, 거기서는 대기 공간이나 ` +
+        `예약 방법처럼 다른 이야기를 다룹니다.`,
+    );
+  }
+
   if (opts.subject?.trim()) lines.push(`상호/제품명: ${opts.subject.trim()}`);
   if (opts.location?.trim())
     lines.push(

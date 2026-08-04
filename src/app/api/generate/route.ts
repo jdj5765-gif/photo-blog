@@ -56,6 +56,20 @@ export async function POST(req: Request) {
     }
   }
 
+  const visit = body.visit;
+  if (
+    !visit ||
+    typeof visit.arrivalTime !== "string" ||
+    !visit.arrivalTime.trim() ||
+    (visit.waited !== "있음" && visit.waited !== "없음") ||
+    (visit.waited === "있음" && !String(visit.waitMinutes ?? "").trim())
+  ) {
+    return Response.json(
+      { error: "도착 시각과 웨이팅 정보를 입력해주세요." },
+      { status: 400 },
+    );
+  }
+
   const opts: GenerateOptions = {
     postType: body.postType === "product" ? "product" : "restaurant",
     subject: body.subject,
@@ -63,6 +77,7 @@ export async function POST(req: Request) {
     highlights: body.highlights,
     naverKeywords: body.naverKeywords,
     keywordVotes: Array.isArray(body.keywordVotes) ? body.keywordVotes.slice(0, 20) : undefined,
+    visit,
     facts: body.facts,
     extra: body.extra,
   };
