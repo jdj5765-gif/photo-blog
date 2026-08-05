@@ -1,9 +1,18 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NAVER_KEYWORD_GROUPS, HIGHLIGHT_PRESETS } from "@/lib/naver-keywords";
 import type { PostType, VisitInfo, OrderedMenu } from "@/lib/prompt";
 import { formatPrice, type PlaceInfo } from "@/lib/naver-place";
+import {
+  loadDrafts,
+  saveDraft,
+  updateDraft,
+  deleteDraft,
+  formatSavedAt,
+  formatExpiry,
+  type SavedDraft,
+} from "@/lib/draft-store";
 
 const MAX_IMAGES = 30;
 
@@ -481,8 +490,32 @@ export default function Home() {
   const [copiedTitle, setCopiedTitle] = useState<number | null>(null);
   // 결과를 직접 손볼 때 씁니다. 크레딧이 들지 않습니다.
   const [editing, setEditing] = useState(false);
+
+  // 보관함 — 생성한 글을 이 브라우저에 24시간만 남깁니다.
+  const [drafts, setDrafts] = useState<SavedDraft[]>([]);
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+
   const fileInput = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // 첫 화면에서 보관함을 읽습니다. 이때 24시간 지난 항목이 함께 정리됩니다.
+  //
+  // localStorage는 서버에 없으므로 렌더 중에 읽으면 서버가 그린 빈 목록과
+  // 어긋납니다(hydration mismatch). 마운트 뒤 한 번만 읽는 게 맞습니다.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 브라우저 전용 저장소를 마운트 후 1회 읽는 경우
+    setDrafts(loadDrafts());
+  }, []);
+
+  // 불러온 글을 고치면 새 항목을 만들지 않고 그 항목을 덮어씁니다.
+  // 생성 중에는 글자가 계속 늘어나므로 건드리지 않습니다.
+  useEffect(() => {
+    if (!currentDraftId || loading) return;
+    const timer = setTimeout(() => {
+      setDrafts(updateDraft(currentDraftId, result));
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [result, currentDraftId, loading]);
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
     setError("");
@@ -626,6 +659,8 @@ export default function Home() {
     setLoading(true);
     setError("");
     setResult("");
+    // 새로 생성하는 글은 보관함의 새 항목이 됩니다.
+    setCurrentDraftId(null);
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -684,10 +719,21 @@ export default function Home() {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
+      let full = "";
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        setResult((prev) => prev + decoder.decode(value, { stream: true }));
+        const chunk = decoder.decode(value, { stream: true });
+        full += chunk;
+        setResult((prev) => prev + chunk);
+      }
+
+      // 다 받은 글을 보관함에 자동으로 담습니다. 중지했으면 담지 않습니다.
+      if (full.trim()) {
+        const name = subject.trim() || placeInfo?.name || "";
+        const { draft, drafts: next } = saveDraft(name, full);
+        setCurrentDraftId(draft.id);
+        setDrafts(next);
       }
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
@@ -722,6 +768,19 @@ export default function Home() {
     await navigator.clipboard.writeText(t);
     setCopiedTitle(i);
     setTimeout(() => setCopiedTitle(null), 1500);
+  };
+
+  const openDraft = (d: SavedDraft) => {
+    setResult(d.body);
+    setCurrentDraftId(d.id);
+    setEditing(false);
+    setError("");
+  };
+
+  const removeDraft = (id: string) => {
+    setDrafts(deleteDraft(id));
+    // 보고 있던 글을 지우면 화면의 글은 남기되 더 이상 저장하지 않습니다.
+    if (id === currentDraftId) setCurrentDraftId(null);
   };
 
   const download = () => {
@@ -1391,6 +1450,58 @@ export default function Home() {
           </p>
         </section>
       )}
+
+      {/* 보관함 — 이 브라우저에만, 24시간만 남습니다 */}
+      <section className="mt-12 border-t border-neutral-200 pt-6 dark:border-neutral-800">
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 className="text-lg font-semibold">보관함</h2>
+          <span className="text-xs text-neutral-500">
+            이 브라우저에만 저장 · 24시간 뒤 자동 삭제
+          </span>
+        </div>
+        {drafts.length === 0 ? (
+          <p className="text-sm text-neutral-500">
+            아직 저장된 글이 없습니다. 글을 생성하면 자동으로 여기에 담깁니다.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {drafts.map((d) => (
+              <li
+                key={d.id}
+                className={`flex items-center gap-3 rounded-lg border bg-white p-3 dark:bg-neutral-900 ${
+                  d.id === currentDraftId
+                    ? "border-neutral-900 dark:border-neutral-400"
+                    : "border-neutral-200 dark:border-neutral-800"
+                }`}
+              >
+                <span className="flex-1 truncate text-sm font-medium">
+                  {d.storeName}
+                </span>
+                <span className="shrink-0 text-xs text-neutral-500">
+                  {formatSavedAt(d.savedAt)}
+                </span>
+                <span className="shrink-0 text-xs text-neutral-400">
+                  {formatExpiry(d.savedAt)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => openDraft(d)}
+                  className="shrink-0 rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
+                >
+                  {d.id === currentDraftId ? "보는 중" : "열기"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeDraft(d.id)}
+                  className="shrink-0 rounded border border-neutral-300 px-2 py-1 text-xs text-red-600 dark:border-neutral-700"
+                >
+                  삭제
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </main>
   );
 }
