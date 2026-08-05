@@ -1,4 +1,4 @@
-import { fetchPlaceInfo, placeInfoToFacts } from "@/lib/naver-place";
+import { fetchPlaceInfo, placeInfoToFacts, placeInfoToIntro } from "@/lib/naver-place";
 import { isAuthenticated } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -22,7 +22,11 @@ export async function POST(req: Request) {
 
   try {
     const info = await fetchPlaceInfo(url);
-    return Response.json({ info, facts: placeInfoToFacts(info) });
+    return Response.json({
+      info,
+      facts: placeInfoToFacts(info),
+      intro: placeInfoToIntro(info),
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "플레이스 정보를 가져오지 못했습니다.";
     return Response.json({ error: msg }, { status: 502 });

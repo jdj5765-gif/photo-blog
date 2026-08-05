@@ -121,6 +121,7 @@ export async function POST(req: Request) {
     purpose: body.purpose,
     reservation: body.reservation,
     facts: body.facts,
+    intro: body.intro,
     extra: body.extra,
   };
 

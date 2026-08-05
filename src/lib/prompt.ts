@@ -81,6 +81,8 @@ export interface GenerateOptions {
   reservation?: string;
   /** 가격, 영업시간, 방문일 등 사용자가 아는 사실 */
   facts?: string;
+  /** 네이버 플레이스의 한 줄 소개와 사장님 소개글. 사실이 아니라 참고용입니다. */
+  intro?: string;
   /** 추가 요청 사항 */
   extra?: string;
 }
@@ -280,6 +282,19 @@ export function buildUserText(opts: GenerateOptions, imageCount: number): string
   );
 
   if (opts.facts?.trim()) lines.push(`확인된 정보(사실로 사용 가능): ${opts.facts.trim()}`);
+
+  if (opts.intro?.trim()) {
+    lines.push(
+      `가게가 내세우는 점 (참고용, 사실 아님):\n${opts.intro.trim()}\n` +
+        `이건 가게가 직접 쓴 홍보 문구입니다. 다음 용도로만 쓰세요.\n` +
+        `- 무엇을 강조해서 쓸지, 어느 메뉴를 앞세울지 정하는 참고 자료\n` +
+        `- 여기 적힌 내용 중 제가 사진이나 확인된 정보로 뒷받침할 수 있는 것만 본문에 씁니다\n` +
+        `금지: 문장을 그대로 옮기거나 비슷하게 바꿔 쓰기, ` +
+        `여기에만 있고 제가 확인해주지 않은 내용(재료·조리법·수상 이력·원산지 등)을 사실처럼 쓰기, ` +
+        `제가 먹지 않은 메뉴를 칭찬하기. 홍보 문구 티가 나면 안 됩니다.`,
+    );
+  }
+
   if (opts.extra?.trim()) lines.push(`추가 요청: ${opts.extra.trim()}`);
 
   lines.push(

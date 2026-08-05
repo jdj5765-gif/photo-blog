@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { NAVER_KEYWORD_GROUPS, HIGHLIGHT_PRESETS } from "@/lib/naver-keywords";
 import type { PostType, VisitInfo, OrderedMenu } from "@/lib/prompt";
-import type { PlaceInfo } from "@/lib/naver-place";
+import { formatPrice, type PlaceInfo } from "@/lib/naver-place";
 
 const MAX_IMAGES = 30;
 
@@ -304,7 +304,11 @@ function PlaceInfoCard({
   const priced = info.menus.filter((m) => m.price);
   const rows: { icon: string; label: string; value: string | null }[] = [
     { icon: "📍", label: "주소", value: info.roadAddress ?? info.address },
-    { icon: "🕒", label: "영업", value: info.businessHours },
+    {
+      icon: "🕒",
+      label: "영업",
+      value: [info.businessHours, info.lastOrder].filter(Boolean).join(" · ") || null,
+    },
     {
       icon: "🅿️",
       label: "주차",
@@ -351,9 +355,7 @@ function PlaceInfoCard({
         priced.length > 0
           ? priced
               .slice(0, 3)
-              .map(
-                (m) => `${m.name} ${Number(m.price).toLocaleString("ko-KR")}원`,
-              )
+              .map((m) => `${m.name} ${formatPrice(m.price)}`)
               .join(" · ")
           : null,
     },
@@ -361,7 +363,7 @@ function PlaceInfoCard({
 
   return (
     <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 p-4 text-sm dark:border-neutral-800 dark:bg-neutral-900/50">
-      <p className="mb-3 font-medium">
+      <p className="mb-1 font-medium">
         {info.name ?? "가게 정보"}
         {info.category && (
           <span className="ml-2 text-xs font-normal text-neutral-500">
@@ -374,6 +376,10 @@ function PlaceInfoCard({
           </span>
         )}
       </p>
+      {info.tagline && (
+        <p className="mb-3 text-xs text-neutral-500">“{info.tagline}”</p>
+      )}
+      {!info.tagline && <div className="mb-3" />}
       <dl className="grid gap-1.5">
         {rows.map((r) => (
           <div key={r.label} className="flex gap-2">
@@ -407,6 +413,21 @@ function PlaceInfoCard({
           {info.conveniences.join(" · ")}
         </p>
       )}
+
+      {info.intro && (
+        <details className="mt-3 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+          <summary className="cursor-pointer text-xs text-neutral-500">
+            가게 소개글 (사장님이 쓴 홍보 문구)
+          </summary>
+          <p className="mt-2 text-xs whitespace-pre-line text-neutral-500">
+            {info.intro}
+          </p>
+          <p className="mt-2 text-xs text-neutral-400">
+            어디를 강조할지 정하는 참고용으로만 씁니다. 이 글의 문장을 그대로 옮기거나,
+            여기에만 있는 내용을 사실처럼 쓰지 않습니다.
+          </p>
+        </details>
+      )}
     </div>
   );
 }
@@ -420,6 +441,8 @@ export default function Home() {
   const [customHighlight, setCustomHighlight] = useState("");
   const [naverKeywords, setNaverKeywords] = useState<string[]>([]);
   const [facts, setFacts] = useState("");
+  /** 플레이스 소개글. 확인된 정보와 달리 사실이 아니라 참고용입니다. */
+  const [intro, setIntro] = useState("");
   const [extra, setExtra] = useState("");
 
   // 방문 기록 — 사진으로는 알 수 없어서 필수로 받습니다.
@@ -537,6 +560,8 @@ export default function Home() {
       applyAutoFacts(buildAutoFacts(nextFacts, manual));
 
       setKeywordVotes(info.keywordVotes ?? []);
+      // 소개글은 홍보 문구라 '확인된 정보'와 섞지 않고 따로 들고 갑니다.
+      setIntro(typeof data.intro === "string" ? data.intro : "");
       setPlaceInfo(info);
 
       const missing: string[] = [];
@@ -632,6 +657,7 @@ export default function Home() {
           purpose,
           reservation,
           facts,
+          intro,
           extra,
           images,
         }),
@@ -719,9 +745,7 @@ export default function Home() {
   // 플레이스에서 가져온 메뉴를 골라 담을 수 있게 "이름 가격" 형태로 만듭니다.
   const menuChoices =
     placeInfo?.menus.map((m) =>
-      m.price
-        ? `${m.name} ${Number(m.price).toLocaleString("ko-KR")}원`
-        : m.name,
+      m.price ? `${m.name} ${formatPrice(m.price)}` : m.name,
     ) ?? [];
 
   const titles = parseTitles(result);

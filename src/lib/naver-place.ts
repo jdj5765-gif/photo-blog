@@ -29,6 +29,12 @@ export interface PlaceInfo {
   phone: string | null;
   conveniences: string[];
   businessHours: string | null;
+  /** "20:30에 라스트오더"처럼 네이버가 보여주는 마감 안내 */
+  lastOrder: string | null;
+  /** 네이버가 뽑은 한 줄 소개. 예) "광안리 최고의 피자 맛집" */
+  tagline: string | null;
+  /** 사장님이 직접 쓴 소개글. 사실이 아니라 홍보 문구이므로 참고용으로만 씁니다. */
+  intro: string | null;
   menus: PlaceMenu[];
   /** 사장님이 실제로 쓰고 있는 네이버 도구 (네이버예약 등). 원격 예약 가능 여부 판단용 */
   activeTools: string[];
@@ -187,6 +193,64 @@ function findBusinessHours(state: unknown): unknown {
   return walk(state);
 }
 
+/**
+ * 사장님이 직접 쓴 소개글을 찾습니다.
+ * 키가 `description({"source":["shopWindow"]})` 처럼 인자를 달고 있어서
+ * 이름이 고정되어 있지 않습니다. 그래서 접두사로 훑습니다.
+ */
+function findIntro(state: unknown): string | null {
+  const seen = new Set<object>();
+
+  function walk(node: unknown): string | null {
+    if (!node || typeof node !== "object") return null;
+    if (seen.has(node)) return null;
+    seen.add(node);
+
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      // 인자가 붙은 형태(`description({"source":["shopWindow"]})`)만 소개글입니다.
+      // 인자 없는 description은 메뉴 설명이나 남의 후기라 집으면 안 됩니다.
+      if (
+        key.startsWith("description(") &&
+        typeof value === "string" &&
+        value.trim().length > 10
+      ) {
+        return value.trim();
+      }
+      const nested = walk(value);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  return walk(state);
+}
+
+/** "20:30에 라스트오더" 같은 마감 안내. 영업시간과 같은 자리에 붙어 있습니다. */
+function findLastOrder(state: unknown): string | null {
+  const seen = new Set<object>();
+
+  function walk(node: unknown): string | null {
+    if (!node || typeof node !== "object") return null;
+    if (seen.has(node)) return null;
+    seen.add(node);
+
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (key === "businessStatusDescription" && value && typeof value === "object") {
+        const d = (value as Record<string, unknown>).description;
+        // '영업 시작' 안내는 지금 문 닫혔다는 뜻일 뿐이라 글에 쓸 게 없습니다.
+        if (typeof d === "string" && /라스트오더|영업 ?종료|운영 ?종료/.test(d)) {
+          return d.trim();
+        }
+      }
+      const nested = walk(value);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  return walk(state);
+}
+
 interface BusinessTool {
   title?: string | null;
   using?: boolean | null;
@@ -319,6 +383,13 @@ export async function fetchPlaceInfo(input: string): Promise<PlaceInfo> {
 
   const reviews = base.visitorReviewsTotal;
 
+  // 네이버가 뽑은 한 줄 소개는 배열로 오는데 실제로는 한 개만 들어 있습니다.
+  const micro = Array.isArray(base.microReviews)
+    ? (base.microReviews as unknown[]).find(
+        (m): m is string => typeof m === "string" && m.trim() !== "",
+      )
+    : undefined;
+
   return {
     id,
     name: str(base.name),
@@ -328,12 +399,27 @@ export async function fetchPlaceInfo(input: string): Promise<PlaceInfo> {
     phone: str(base.virtualPhone) ?? str(base.phone),
     conveniences,
     businessHours: formatBusinessHours(findBusinessHours(state)),
+    lastOrder: findLastOrder(state),
+    tagline: micro?.trim() ?? null,
+    intro: findIntro(state),
     activeTools,
     keywordVotes: findKeywordVotes(state),
     menus,
     visitorReviewCount: typeof reviews === "number" ? reviews : null,
     placeUrl,
   };
+}
+
+/**
+ * 가격을 사람이 읽는 형태로 만듭니다.
+ *
+ * '(소),(대)'처럼 숫자가 아닌 값이 오는 가게가 있습니다.
+ * 그대로 Number()에 넣으면 NaN이 되어 없는 가격을 사실처럼 넘기게 됩니다.
+ */
+export function formatPrice(price: string | null): string {
+  if (!price) return "가격 미표기";
+  const n = Number(price);
+  return Number.isFinite(n) && n > 0 ? `${n.toLocaleString("ko-KR")}원` : price;
 }
 
 /** 프롬프트의 '확인된 정보' 칸에 그대로 넣을 수 있는 텍스트로 만듭니다. */
@@ -344,19 +430,36 @@ export function placeInfoToFacts(info: PlaceInfo): string {
   if (info.roadAddress) lines.push(`주소: ${info.roadAddress}`);
   else if (info.address) lines.push(`주소: ${info.address}`);
   if (info.businessHours) lines.push(`영업시간: ${info.businessHours}`);
+  if (info.lastOrder) lines.push(`마감 안내: ${info.lastOrder}`);
   if (info.phone) lines.push(`전화: ${info.phone}`);
   if (info.conveniences.length > 0) lines.push(`편의: ${info.conveniences.join(", ")}`);
 
   if (info.menus.length > 0) {
     const menuText = info.menus
       .slice(0, 15)
-      .map((m) => {
-        const price = m.price ? `${Number(m.price).toLocaleString("ko-KR")}원` : "가격 미표기";
-        return `${m.name} ${price}`;
-      })
+      .map((m) => `${m.name} ${formatPrice(m.price)}`)
       .join(" / ");
     lines.push(`메뉴: ${menuText}`);
   }
 
+  return lines.join("\n");
+}
+
+/**
+ * 가게가 스스로 내세우는 점입니다.
+ *
+ * 확인된 정보와 일부러 분리했습니다. 소개글은 사장님이 쓴 홍보 문구라
+ * 사실로 다루면 안 되고, 어디를 강조할지 고르는 데만 씁니다.
+ * 너무 길면 프롬프트만 무거워져서 앞부분만 씁니다.
+ */
+export function placeInfoToIntro(info: PlaceInfo): string {
+  const lines: string[] = [];
+  if (info.tagline) lines.push(`한 줄 소개: ${info.tagline}`);
+  if (info.intro) {
+    const trimmed = info.intro.replace(/\n{2,}/g, "\n").trim();
+    lines.push(
+      `가게 소개글: ${trimmed.length > 600 ? `${trimmed.slice(0, 600)}…` : trimmed}`,
+    );
+  }
   return lines.join("\n");
 }
