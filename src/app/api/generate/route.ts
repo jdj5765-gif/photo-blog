@@ -155,8 +155,12 @@ export async function POST(req: Request) {
 
   try {
     const stream = client.messages.stream({
-      model: "claude-opus-5",
+      model: "claude-sonnet-5",
       max_tokens: 16000,
+      // 이 모델은 값을 안 주면 effort가 high입니다. 생각 토큰은 출력 요금으로
+      // 청구되는데, 이 작업은 스타일 가이드가 다 주어진 정형 글쓰기라
+      // high까지 갈 이유가 없습니다. 글이 얕아지면 이 한 줄만 지우면 됩니다.
+      output_config: { effort: "medium" },
       system: [
         {
           type: "text",
