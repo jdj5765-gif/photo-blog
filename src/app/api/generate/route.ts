@@ -8,6 +8,21 @@ export const maxDuration = 300;
 const MAX_IMAGES = 30;
 const ALLOWED_MEDIA = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
+/** API가 돌려준 영어 오류를 사용자가 읽을 수 있는 문구로 바꿉니다. */
+function friendlyMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : "";
+  if (raw.includes("credit balance")) {
+    return "Anthropic 크레딧이 부족합니다. console.anthropic.com > Plans & Billing 에서 충전한 뒤 다시 시도해주세요.";
+  }
+  if (raw.includes("rate_limit") || raw.includes("429")) {
+    return "요청이 몰렸습니다. 잠시 후 다시 시도해주세요.";
+  }
+  if (raw.includes("authentication") || raw.includes("401")) {
+    return "API 키가 유효하지 않습니다.";
+  }
+  return raw || "알 수 없는 오류";
+}
+
 interface ImagePayload {
   media_type: string;
   data: string; // base64, no data: prefix
@@ -160,8 +175,7 @@ export async function POST(req: Request) {
           }
           controller.close();
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "알 수 없는 오류";
-          controller.enqueue(encoder.encode(`\n\n[오류] ${msg}`));
+          controller.enqueue(encoder.encode(`\n\n[오류] ${friendlyMessage(err)}`));
           controller.close();
         }
       },
@@ -187,7 +201,6 @@ export async function POST(req: Request) {
         { status: 429 },
       );
     }
-    const msg = err instanceof Error ? err.message : "알 수 없는 오류";
-    return Response.json({ error: msg }, { status: 500 });
+    return Response.json({ error: friendlyMessage(err) }, { status: 500 });
   }
 }
