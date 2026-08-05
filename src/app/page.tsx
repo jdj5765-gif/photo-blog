@@ -37,7 +37,15 @@ async function encode(
   edge: number,
   quality: number,
 ): Promise<string> {
-  const bitmap = await createImageBitmap(file);
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    // 폰에서 시간이 지나면 파일 핸들이 무효가 되는 일이 있습니다.
+    throw new Error(
+      `'${file.name}'을(를) 읽지 못했습니다. 사진을 지우고 다시 올려주세요.`,
+    );
+  }
   const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bitmap.width * scale);
@@ -62,6 +70,13 @@ async function fileToPhoto(file: File): Promise<Photo> {
 }
 
 /**
+ * 한 번 압축한 결과를 사진별로 들고 있습니다.
+ * 다시 생성할 때 원본 파일을 또 읽지 않아서 빠르고,
+ * 같은 바이트가 나가므로 서버 캐시도 확실히 맞습니다.
+ */
+const encoded = new Map<string, string>();
+
+/**
  * 장수에 맞춰 사진 한 장당 쓸 수 있는 용량을 나누고,
  * 그 안에 들어올 때까지 화질을 단계적으로 낮춥니다.
  */
@@ -72,7 +87,20 @@ async function buildImages(
   const perPhoto = UPLOAD_BUDGET / Math.max(photos.length, 1);
   const out: { media_type: string; data: string }[] = [];
 
+  // 장수가 바뀌면 장당 예산이 달라지므로 열쇠에 장수를 넣습니다.
+  const keyOf = (photo: Photo) => `${photo.id}|${photos.length}`;
+  const live = new Set(photos.map(keyOf));
+  for (const key of [...encoded.keys()]) {
+    if (!live.has(key)) encoded.delete(key);
+  }
+
   for (const [i, photo] of photos.entries()) {
+    const cached = encoded.get(keyOf(photo));
+    if (cached) {
+      out.push({ media_type: "image/jpeg", data: cached });
+      onProgress?.(i + 1);
+      continue;
+    }
     let data = "";
     let fits = false;
     for (const step of STEPS) {
@@ -89,6 +117,7 @@ async function buildImages(
       data = await encode(photo.file, edge, 0.45);
       fits = data.length <= perPhoto;
     }
+    encoded.set(keyOf(photo), data);
     out.push({ media_type: "image/jpeg", data });
     onProgress?.(i + 1);
   }
