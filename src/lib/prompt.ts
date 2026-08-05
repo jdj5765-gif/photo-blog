@@ -36,6 +36,17 @@ export function toKoreanTime(hhmm: string): string | null {
   return `${period} ${hour12}시${minuteText}`;
 }
 
+/**
+ * 시킨 메뉴 하나. 맛은 사진으로 알 수 없어서 직접 받습니다.
+ * 짧게 적어도 됩니다. 이 메모를 근거로 문장을 만들고, 없는 맛을 지어내지 않습니다.
+ */
+export interface OrderedMenu {
+  /** "물밀면 7,000원" 처럼 가격이 붙어 있을 수 있습니다. */
+  name: string;
+  /** "국물 진하고 잡내 없음" 같은 한 줄 메모 */
+  taste: string;
+}
+
 /** 방문 기록. 사진만으로는 알 수 없어서 사용자가 직접 채워야 하는 값입니다. */
 export interface VisitInfo {
   /** 도착 시각 "18:30" */
@@ -61,7 +72,13 @@ export interface GenerateOptions {
   /** 방문 기록 — 필수. 도입부에 반드시 들어갑니다. */
   visit?: VisitInfo;
   /** 실제로 시킨 메뉴 — 필수. 메뉴 섹션은 이것만 다룹니다. */
-  orderedMenus?: string[];
+  orderedMenus?: OrderedMenu[];
+  /** 누구와 갔는지 (선택) */
+  companion?: string;
+  /** 방문 목적 (선택) */
+  purpose?: string;
+  /** 예약·웨이팅 방법 (선택) */
+  reservation?: string;
   /** 가격, 영업시간, 방문일 등 사용자가 아는 사실 */
   facts?: string;
   /** 추가 요청 사항 */
@@ -171,14 +188,43 @@ export function buildUserText(opts: GenerateOptions, imageCount: number): string
     );
   }
 
-  const ordered = opts.orderedMenus?.filter((m) => m.trim()) ?? [];
+  const ordered = opts.orderedMenus?.filter((m) => m?.name?.trim()) ?? [];
   if (ordered.length > 0) {
     lines.push(
-      `[시킨 메뉴 — 확인된 사실. 이것만 다룹니다]\n- ${ordered.join("\n- ")}\n` +
-        `메뉴 섹션에서는 위 메뉴만 하나씩 설명합니다. 주문하지 않은 메뉴를 먹은 것처럼 쓰지 마세요.\n` +
-        `가격이 적혀 있으면 그 숫자를 그대로 쓰고, 없으면 가격을 지어내지 말고 빈칸 '____'로 둡니다.\n` +
-        `메뉴마다 식감·온도·간·향 중 최소 두 가지를 언급합니다.`,
+      `[시킨 메뉴와 먹어본 맛 — 확인된 사실. 이것만 다룹니다]\n` +
+        ordered.map((m) => `- ${m.name} → 맛: ${m.taste}`).join("\n") +
+        `\n메뉴 섹션에서는 위 메뉴만 하나씩 설명합니다. 주문하지 않은 메뉴를 먹은 것처럼 쓰지 마세요.\n` +
+        `'맛:' 뒤의 메모가 그 메뉴에 대해 확인된 유일한 미각 정보입니다.\n` +
+        `이 메모를 두세 문장으로 자연스럽게 풀어 쓰되, 메모에 없는 맛을 새로 지어내지 마세요.\n` +
+        `예) 맛 메모가 '국물 진하고 잡내 없음'이면 → 국물이 진한데도 잡내가 전혀 없었어요.\n` +
+        `    한 숟갈 떠먹고 바로 납득했답니다.\n` +
+        `메모가 짧아도 없는 맛을 채워 넣지 말고, 대신 온도·양·비주얼처럼 사진과 상황에서 ` +
+        `확인되는 것으로 문단을 채웁니다.\n` +
+        `가격이 적혀 있으면 그 숫자를 그대로 쓰고, 없으면 지어내지 말고 빈칸 '____'로 둡니다.`,
     );
+  }
+
+  const context: string[] = [];
+  if (opts.companion?.trim()) {
+    context.push(
+      `- 동행: ${opts.companion.trim()} — 도입부에서 자연스럽게 드러냅니다. ` +
+        `인원에 맞는 시점으로 씁니다(혼자면 '저는', 둘 이상이면 '저희는').`,
+    );
+  }
+  if (opts.purpose?.trim()) {
+    context.push(
+      `- 방문 목적: ${opts.purpose.trim()} — 왜 이 가게를 찾게 됐는지 도입부에 녹입니다. ` +
+        `총평의 추천 3줄 중 하나는 이 상황을 다룹니다.`,
+    );
+  }
+  if (opts.reservation?.trim()) {
+    context.push(
+      `- 예약·웨이팅 방법: ${opts.reservation.trim()} — 웨이팅 섹션에서 다룹니다. ` +
+        `도입부의 대기 시간 이야기와 중복되지 않게, 여기서는 방법과 팁 위주로 씁니다.`,
+    );
+  }
+  if (context.length > 0) {
+    lines.push(`[방문 상황 — 확인된 사실]\n${context.join("\n")}`);
   }
 
   if (opts.subject?.trim()) lines.push(`상호/제품명: ${opts.subject.trim()}`);

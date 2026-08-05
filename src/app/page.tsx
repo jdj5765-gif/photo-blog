@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { NAVER_KEYWORD_GROUPS, HIGHLIGHT_PRESETS } from "@/lib/naver-keywords";
-import type { PostType, VisitInfo } from "@/lib/prompt";
+import type { PostType, VisitInfo, OrderedMenu } from "@/lib/prompt";
 import type { PlaceInfo } from "@/lib/naver-place";
 
 const MAX_IMAGES = 30;
@@ -230,7 +230,6 @@ function has(list: string[], keyword: string): boolean {
 /** 네이버가 안 갖고 있어서 직접 눌러야 하는 항목 */
 export interface ManualInfo {
   restroom: "실내" | "실외" | null;
-  remoteWaiting: "가능" | "불가" | null;
 }
 
 function Toggle({
@@ -360,7 +359,7 @@ function PlaceInfoCard({
       </dl>
       <div className="mt-3 grid gap-1.5 border-t border-neutral-200 pt-3 dark:border-neutral-800">
         <p className="text-xs text-neutral-500">
-          아래 둘은 네이버가 갖고 있지 않아 직접 눌러주셔야 합니다. 누른 값만 글에 반영됩니다.
+          화장실 위치는 네이버가 갖고 있지 않아 직접 눌러주셔야 합니다. 누른 값만 글에 반영됩니다.
         </p>
         <div className="flex items-center gap-2">
           <span className="w-24 shrink-0 text-neutral-500">🚻 화장실 위치</span>
@@ -369,19 +368,6 @@ function PlaceInfoCard({
             value={manual.restroom}
             onChange={(v) =>
               onManualChange({ ...manual, restroom: v as ManualInfo["restroom"] })
-            }
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-24 shrink-0 text-neutral-500">📱 원격 웨이팅</span>
-          <Toggle
-            options={["가능", "불가"]}
-            value={manual.remoteWaiting}
-            onChange={(v) =>
-              onManualChange({
-                ...manual,
-                remoteWaiting: v as ManualInfo["remoteWaiting"],
-              })
             }
           />
         </div>
@@ -411,8 +397,11 @@ export default function Home() {
   const [arrivalTime, setArrivalTime] = useState("");
   const [waited, setWaited] = useState<VisitInfo["waited"] | null>(null);
   const [waitMinutes, setWaitMinutes] = useState("");
-  const [orderedMenus, setOrderedMenus] = useState<string[]>([]);
+  const [orderedMenus, setOrderedMenus] = useState<OrderedMenu[]>([]);
   const [customMenu, setCustomMenu] = useState("");
+  const [companion, setCompanion] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [reservation, setReservation] = useState("");
 
   const [keywordVotes, setKeywordVotes] = useState<
     { name: string; count: number }[]
@@ -420,7 +409,6 @@ export default function Home() {
   const [placeInfo, setPlaceInfo] = useState<PlaceInfo | null>(null);
   const [manual, setManual] = useState<ManualInfo>({
     restroom: null,
-    remoteWaiting: null,
   });
   // 서버에서 받은 원본 정보. 토글을 바꿀 때마다 여기에 덧붙여 다시 씁니다.
   const [baseFacts, setBaseFacts] = useState("");
@@ -480,7 +468,6 @@ export default function Home() {
     [
       base,
       m.restroom ? `화장실: ${m.restroom}` : null,
-      m.remoteWaiting ? `원격 웨이팅: ${m.remoteWaiting}` : null,
     ]
       .filter(Boolean)
       .join("\n");
@@ -541,10 +528,26 @@ export default function Home() {
   const toggle = (arr: string[], set: (v: string[]) => void, v: string) =>
     set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
 
+  const toggleMenu = (name: string) => {
+    setOrderedMenus((prev) =>
+      prev.some((m) => m.name === name)
+        ? prev.filter((m) => m.name !== name)
+        : [...prev, { name, taste: "" }],
+    );
+  };
+
+  const setTaste = (name: string, taste: string) => {
+    setOrderedMenus((prev) =>
+      prev.map((m) => (m.name === name ? { ...m, taste } : m)),
+    );
+  };
+
   const addCustomMenu = () => {
     const v = customMenu.trim();
     if (!v) return;
-    if (!orderedMenus.includes(v)) setOrderedMenus([...orderedMenus, v]);
+    setOrderedMenus((prev) =>
+      prev.some((m) => m.name === v) ? prev : [...prev, { name: v, taste: "" }],
+    );
     setCustomMenu("");
   };
 
@@ -594,6 +597,9 @@ export default function Home() {
             waitMinutes: waited === "있음" ? waitMinutes.trim() : undefined,
           },
           orderedMenus,
+          companion,
+          purpose,
+          reservation,
           facts,
           extra,
           images,
@@ -677,6 +683,7 @@ export default function Home() {
   if (!waited) visitMissing.push("웨이팅 여부");
   if (waited === "있음" && !waitMinutes.trim()) visitMissing.push("대기 시간");
   if (orderedMenus.length === 0) visitMissing.push("시킨 메뉴");
+  else if (orderedMenus.some((m) => !m.taste.trim())) visitMissing.push("메뉴별 맛");
 
   // 플레이스에서 가져온 메뉴를 골라 담을 수 있게 "이름 가격" 형태로 만듭니다.
   const menuChoices =
@@ -952,8 +959,8 @@ export default function Home() {
                 <Chip
                   key={m}
                   label={m}
-                  active={orderedMenus.includes(m)}
-                  onClick={() => toggle(orderedMenus, setOrderedMenus, m)}
+                  active={orderedMenus.some((o) => o.name === m)}
+                  onClick={() => toggleMenu(m)}
                 />
               ))}
             </div>
@@ -982,27 +989,86 @@ export default function Home() {
           </div>
 
           {orderedMenus.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="mt-3 grid gap-2">
+              <p className="text-xs text-neutral-500">
+                맛은 사진으로 알 수 없어서 직접 적어주셔야 합니다. 짧아도
+                됩니다 — 적어주신 만큼만 쓰고 없는 맛은 지어내지 않습니다.
+              </p>
               {orderedMenus.map((m) => (
-                <span
-                  key={m}
-                  className="flex items-center gap-1.5 rounded-full bg-neutral-900 px-3 py-1.5 text-sm text-white dark:bg-white dark:text-neutral-900"
-                >
-                  {m}
+                <div key={m.name} className="flex items-center gap-2">
+                  <span className="w-40 shrink-0 truncate text-sm" title={m.name}>
+                    {m.name}
+                  </span>
+                  <input
+                    className={inputCls}
+                    value={m.taste}
+                    onChange={(e) => setTaste(m.name, e.target.value)}
+                    placeholder="예: 국물 진하고 잡내 없음, 좀 짬"
+                  />
                   <button
                     type="button"
                     onClick={() =>
-                      setOrderedMenus(orderedMenus.filter((x) => x !== m))
+                      setOrderedMenus(orderedMenus.filter((x) => x.name !== m.name))
                     }
-                    className="opacity-60 hover:opacity-100"
-                    aria-label={`${m} 빼기`}
+                    className="shrink-0 px-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                    aria-label={`${m.name} 빼기`}
                   >
                     ×
                   </button>
-                </span>
+                </div>
               ))}
             </div>
           )}
+        </div>
+
+        <div className="mt-5 grid gap-4 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+          <p className="text-xs text-neutral-500">
+            아래는 선택입니다. 고르면 글에 반영되고, 비워두면 그 얘기는 빠집니다.
+          </p>
+          {(
+            [
+              {
+                label: "누구와",
+                value: companion,
+                set: setCompanion,
+                options: ["혼자", "둘이서", "3~4명", "5명 이상 단체", "가족과"],
+              },
+              {
+                label: "방문 목적",
+                value: purpose,
+                set: setPurpose,
+                options: ["데이트", "친구 모임", "가족 식사", "회식", "혼밥", "여행 중"],
+              },
+              {
+                label: "예약·웨이팅",
+                value: reservation,
+                set: setReservation,
+                options: [
+                  "예약 없이 바로",
+                  "현장 웨이팅",
+                  "네이버 예약",
+                  "캐치테이블",
+                  "전화 예약",
+                  "테이블링 등 원격 줄서기",
+                ],
+              },
+            ] as const
+          ).map((row) => (
+            <div key={row.label}>
+              <p className="mb-2 text-sm text-neutral-500">{row.label}</p>
+              <div className="flex flex-wrap gap-2">
+                {row.options.map((o) => (
+                  <Chip
+                    key={o}
+                    label={o}
+                    active={row.value === o}
+                    // 같은 걸 다시 누르면 해제됩니다.
+                    onClick={() => row.set(row.value === o ? "" : o)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
 
         {visitMissing.length > 0 && (

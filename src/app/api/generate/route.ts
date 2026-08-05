@@ -71,11 +71,24 @@ export async function POST(req: Request) {
   }
 
   const orderedMenus = Array.isArray(body.orderedMenus)
-    ? body.orderedMenus.filter((m): m is string => typeof m === "string" && m.trim() !== "")
+    ? body.orderedMenus.filter(
+        (m) => m && typeof m.name === "string" && m.name.trim() !== "",
+      )
     : [];
   if (orderedMenus.length === 0) {
     return Response.json(
       { error: "시킨 메뉴를 최소 1개 입력해주세요." },
+      { status: 400 },
+    );
+  }
+  const tasteMissing = orderedMenus.filter(
+    (m) => typeof m.taste !== "string" || m.taste.trim() === "",
+  );
+  if (tasteMissing.length > 0) {
+    return Response.json(
+      {
+        error: `${tasteMissing.map((m) => m.name).join(", ")}의 맛을 한 줄 적어주세요.`,
+      },
       { status: 400 },
     );
   }
@@ -89,6 +102,9 @@ export async function POST(req: Request) {
     keywordVotes: Array.isArray(body.keywordVotes) ? body.keywordVotes.slice(0, 20) : undefined,
     visit,
     orderedMenus,
+    companion: body.companion,
+    purpose: body.purpose,
+    reservation: body.reservation,
     facts: body.facts,
     extra: body.extra,
   };
