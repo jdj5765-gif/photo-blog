@@ -47,3 +47,6 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# Claude Code 로컬 설정 (권한 모드 등)
+.claude/settings.local.json
