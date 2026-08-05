@@ -127,6 +127,10 @@ export async function POST(req: Request) {
   const client = new Anthropic();
 
   // 사진 순서를 모델이 헷갈리지 않도록 각 이미지 뒤에 번호 라벨을 붙입니다.
+  //
+  // 순서가 중요합니다. 사진은 잘 안 바뀌고 아래 설명글은 매번 바뀌므로
+  // 사진 → 설명글 순으로 둡니다. 사진 묶음 끝에 캐시 지점을 찍으면
+  // 같은 사진으로 다시 생성할 때 사진 값을 10분의 1만 냅니다.
   const labeled: Anthropic.ContentBlockParam[] = [];
   images.forEach((img, i) => {
     labeled.push({
@@ -137,7 +141,14 @@ export async function POST(req: Request) {
         data: img.data,
       },
     });
-    labeled.push({ type: "text", text: `↑ [사진${i + 1}]` });
+    const isLast = i === images.length - 1;
+    labeled.push({
+      type: "text",
+      text: `↑ [사진${i + 1}]`,
+      // 기본 5분짜리를 씁니다. 1시간짜리는 저장 비용이 2배라
+      // 두 번만 생성하면 오히려 손해입니다. 읽을 때마다 5분이 다시 채워집니다.
+      ...(isLast ? { cache_control: { type: "ephemeral" as const } } : {}),
+    });
   });
   labeled.push({ type: "text", text: buildUserText(opts, images.length) });
 
@@ -168,6 +179,15 @@ export async function POST(req: Request) {
             }
           }
           const final = await stream.finalMessage();
+
+          // 캐시가 실제로 걸렸는지 배포 로그에서 확인하려고 남깁니다.
+          const u = final.usage;
+          console.log(
+            `[generate] 사진 ${images.length}장 | 입력 ${u.input_tokens} | ` +
+              `캐시저장 ${u.cache_creation_input_tokens ?? 0} | ` +
+              `캐시재사용 ${u.cache_read_input_tokens ?? 0} | 출력 ${u.output_tokens}`,
+          );
+
           if (final.stop_reason === "refusal") {
             controller.enqueue(
               encoder.encode("\n\n[생성이 중단되었습니다. 다른 사진으로 시도해주세요.]"),

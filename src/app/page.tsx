@@ -427,6 +427,8 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedTitle, setCopiedTitle] = useState<number | null>(null);
+  // 결과를 직접 손볼 때 씁니다. 크레딧이 들지 않습니다.
+  const [editing, setEditing] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -1299,6 +1301,13 @@ export default function Home() {
             <div className="flex gap-2">
               <button
                 type="button"
+                onClick={() => setEditing((v) => !v)}
+                className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
+              >
+                {editing ? "수정 끝" : "직접 수정"}
+              </button>
+              <button
+                type="button"
                 onClick={copy}
                 className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
               >
@@ -1313,9 +1322,19 @@ export default function Home() {
               </button>
             </div>
           </div>
-          <ResultView md={result} />
+          {editing ? (
+            <textarea
+              className="min-h-[32rem] w-full rounded-xl border border-neutral-300 bg-white p-5 font-mono text-sm leading-relaxed outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:focus:border-neutral-400"
+              value={result}
+              onChange={(e) => setResult(e.target.value)}
+            />
+          ) : (
+            <ResultView md={result} />
+          )}
           <p className="mt-2 text-xs text-neutral-500">
-            복사하면 굵은 글씨가 유지된 채로 붙습니다. .md 저장은 원문 그대로입니다.
+            {editing
+              ? "고친 내용은 그대로 복사·저장됩니다. **굵게** 표기를 쓰면 복사할 때 굵은 글씨로 붙습니다."
+              : "복사하면 굵은 글씨가 유지된 채로 붙습니다. 내용을 조금만 손볼 거라면 '직접 수정'을 쓰시면 크레딧이 들지 않습니다."}
           </p>
         </section>
       )}
