@@ -60,6 +60,8 @@ export interface GenerateOptions {
   keywordVotes?: { name: string; count: number }[];
   /** 방문 기록 — 필수. 도입부에 반드시 들어갑니다. */
   visit?: VisitInfo;
+  /** 실제로 시킨 메뉴 — 필수. 메뉴 섹션은 이것만 다룹니다. */
+  orderedMenus?: string[];
   /** 가격, 영업시간, 방문일 등 사용자가 아는 사실 */
   facts?: string;
   /** 추가 요청 사항 */
@@ -166,6 +168,16 @@ export function buildUserText(opts: GenerateOptions, imageCount: number): string
           : `다행히 웨이팅 없이 바로 자리에 앉을 수 있었어요.`) +
         `\n뒤쪽 웨이팅 섹션에서 같은 내용을 또 반복하지 말고, 거기서는 대기 공간이나 ` +
         `예약 방법처럼 다른 이야기를 다룹니다.`,
+    );
+  }
+
+  const ordered = opts.orderedMenus?.filter((m) => m.trim()) ?? [];
+  if (ordered.length > 0) {
+    lines.push(
+      `[시킨 메뉴 — 확인된 사실. 이것만 다룹니다]\n- ${ordered.join("\n- ")}\n` +
+        `메뉴 섹션에서는 위 메뉴만 하나씩 설명합니다. 주문하지 않은 메뉴를 먹은 것처럼 쓰지 마세요.\n` +
+        `가격이 적혀 있으면 그 숫자를 그대로 쓰고, 없으면 가격을 지어내지 말고 빈칸 '____'로 둡니다.\n` +
+        `메뉴마다 식감·온도·간·향 중 최소 두 가지를 언급합니다.`,
     );
   }
 

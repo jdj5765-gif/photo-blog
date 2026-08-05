@@ -70,6 +70,16 @@ export async function POST(req: Request) {
     );
   }
 
+  const orderedMenus = Array.isArray(body.orderedMenus)
+    ? body.orderedMenus.filter((m): m is string => typeof m === "string" && m.trim() !== "")
+    : [];
+  if (orderedMenus.length === 0) {
+    return Response.json(
+      { error: "시킨 메뉴를 최소 1개 입력해주세요." },
+      { status: 400 },
+    );
+  }
+
   const opts: GenerateOptions = {
     postType: body.postType === "product" ? "product" : "restaurant",
     subject: body.subject,
@@ -78,6 +88,7 @@ export async function POST(req: Request) {
     naverKeywords: body.naverKeywords,
     keywordVotes: Array.isArray(body.keywordVotes) ? body.keywordVotes.slice(0, 20) : undefined,
     visit,
+    orderedMenus,
     facts: body.facts,
     extra: body.extra,
   };

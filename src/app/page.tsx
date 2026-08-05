@@ -411,6 +411,8 @@ export default function Home() {
   const [arrivalTime, setArrivalTime] = useState("");
   const [waited, setWaited] = useState<VisitInfo["waited"] | null>(null);
   const [waitMinutes, setWaitMinutes] = useState("");
+  const [orderedMenus, setOrderedMenus] = useState<string[]>([]);
+  const [customMenu, setCustomMenu] = useState("");
 
   const [keywordVotes, setKeywordVotes] = useState<
     { name: string; count: number }[]
@@ -539,6 +541,13 @@ export default function Home() {
   const toggle = (arr: string[], set: (v: string[]) => void, v: string) =>
     set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
 
+  const addCustomMenu = () => {
+    const v = customMenu.trim();
+    if (!v) return;
+    if (!orderedMenus.includes(v)) setOrderedMenus([...orderedMenus, v]);
+    setCustomMenu("");
+  };
+
   const addCustomHighlight = () => {
     const v = customHighlight.trim();
     if (!v) return;
@@ -584,6 +593,7 @@ export default function Home() {
             waited,
             waitMinutes: waited === "있음" ? waitMinutes.trim() : undefined,
           },
+          orderedMenus,
           facts,
           extra,
           images,
@@ -666,6 +676,15 @@ export default function Home() {
   if (!arrivalTime) visitMissing.push("도착 시각");
   if (!waited) visitMissing.push("웨이팅 여부");
   if (waited === "있음" && !waitMinutes.trim()) visitMissing.push("대기 시간");
+  if (orderedMenus.length === 0) visitMissing.push("시킨 메뉴");
+
+  // 플레이스에서 가져온 메뉴를 골라 담을 수 있게 "이름 가격" 형태로 만듭니다.
+  const menuChoices =
+    placeInfo?.menus.map((m) =>
+      m.price
+        ? `${m.name} ${Number(m.price).toLocaleString("ko-KR")}원`
+        : m.name,
+    ) ?? [];
 
   const titles = parseTitles(result);
   const usedKeywords = parseUsedKeywords(result);
@@ -870,8 +889,7 @@ export default function Home() {
         <label className={labelCls}>
           방문 기록 <span className="text-red-600">*</span>{" "}
           <span className="font-normal text-neutral-500">
-            — 사진으로는 알 수 없는 정보라 직접 넣어주셔야 합니다. 글 도입부에
-            들어갑니다
+            — 사진으로는 알 수 없는 정보라 직접 넣어주셔야 합니다
           </span>
         </label>
         <div className="grid gap-4 sm:grid-cols-3">
@@ -920,8 +938,75 @@ export default function Home() {
             </div>
           )}
         </div>
+        <div className="mt-4">
+          <p className="mb-2 text-sm text-neutral-500">
+            시킨 메뉴{" "}
+            {menuChoices.length > 0
+              ? "— 드신 것만 눌러주세요"
+              : "— 플레이스 주소를 불러오면 메뉴를 눌러서 고를 수 있습니다"}
+          </p>
+
+          {menuChoices.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {menuChoices.map((m) => (
+                <Chip
+                  key={m}
+                  label={m}
+                  active={orderedMenus.includes(m)}
+                  onClick={() => toggle(orderedMenus, setOrderedMenus, m)}
+                />
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              className={inputCls}
+              value={customMenu}
+              onChange={(e) => setCustomMenu(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCustomMenu();
+                }
+              }}
+              placeholder="목록에 없으면 직접 입력 (예: 수육 25,000원)"
+            />
+            <button
+              type="button"
+              onClick={addCustomMenu}
+              className="shrink-0 rounded-md border border-neutral-300 px-4 text-sm dark:border-neutral-700"
+            >
+              추가
+            </button>
+          </div>
+
+          {orderedMenus.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {orderedMenus.map((m) => (
+                <span
+                  key={m}
+                  className="flex items-center gap-1.5 rounded-full bg-neutral-900 px-3 py-1.5 text-sm text-white dark:bg-white dark:text-neutral-900"
+                >
+                  {m}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOrderedMenus(orderedMenus.filter((x) => x !== m))
+                    }
+                    className="opacity-60 hover:opacity-100"
+                    aria-label={`${m} 빼기`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
         {visitMissing.length > 0 && (
-          <p className="mt-2 text-xs text-neutral-500">
+          <p className="mt-3 text-xs text-neutral-500">
             {visitMissing.join(", ")}을(를) 넣어야 초안을 만들 수 있습니다.
           </p>
         )}
